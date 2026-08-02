@@ -202,19 +202,22 @@
     return `<span class="pill ${sev}" role="status" aria-label="${sev}: ${label}"><span class="pi" aria-hidden="true">${SEV_ICON[sev]||'·'}</span>${label}</span>`;
   }
 
-  // Sparkline inline SVG (§1.3)
-  function sparklineSVG(data, color = '#c8a25a', w = 68, h = 22, currentIdx = -1) {
+  // ──────────────────────────────────────────────────────────────────────────
+  // MICRO-CHARTS (§2.2)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  function sparklineSVG(data, color = '#c8a25a', w = 68, h = 22) {
     const max = Math.max(...data, 1), min = 0;
     const pts = data.map((v, i) => {
       const x = (i / Math.max(data.length - 1, 1)) * w;
       const y = h - ((v - min) / (max - min || 1)) * (h - 2) - 1;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
-    const dot = currentIdx >= 0 && currentIdx < data.length ? (() => {
-      const x = (currentIdx / Math.max(data.length - 1, 1)) * w;
-      const y = h - ((data[currentIdx] - min) / (max - min || 1)) * (h - 2) - 1;
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="${color}" opacity="0.9"/>`;
-    })() : '';
+    // Always draw the dot at the end
+    const lastIdx = data.length - 1;
+    const endX = w;
+    const endY = h - ((data[lastIdx] - min) / (max - min || 1)) * (h - 2) - 1;
+    const dot = `<circle cx="${endX.toFixed(1)}" cy="${endY.toFixed(1)}" r="2.5" fill="${color}" opacity="0.9"/>`;
     return `<svg class="kpi-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
       <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.7"/>
       ${dot}
@@ -222,9 +225,9 @@
   }
 
   // Trend arrow (§1.3)
-  function trendArrow(history, currentIdx) {
-    if (currentIdx < 2 || currentIdx >= history.length) return `<span class="kpi-trend flat">–</span>`;
-    const diff = history[currentIdx] - history[currentIdx - 1];
+  function trendArrow(history) {
+    if (history.length < 2) return `<span class="kpi-trend flat">–</span>`;
+    const diff = history[history.length - 1] - history[history.length - 2];
     if (diff > 0.5)  return `<span class="kpi-trend up"   aria-label="increasing">▲${Math.round(diff)}</span>`;
     if (diff < -0.5) return `<span class="kpi-trend down" aria-label="decreasing">▼${Math.abs(Math.round(diff))}</span>`;
     return `<span class="kpi-trend flat" aria-label="stable">–</span>`;
@@ -314,16 +317,25 @@
     const retailW  = retail.filter(r => r._txn && Math.abs(r._txn - t) < 6*3600000);
     const revenue  = retailW.reduce((a, r) => a + (r.amount||0), 0);
 
-    // Current hour index for sparkline cursor
-    const hIdx = Math.min(23, Math.max(0, state.simTime.getHours()));
+    // Maintain a rolling history buffer for live sparklines (every 5 sim-minutes)
+    if (!state.sparkHistory) {
+      state.sparkHistory = { lastT: 0, active: Array(30).fill(active.length), delayed: Array(30).fill(delayed.length), secWait: Array(30).fill(avgWait), alerts: Array(30).fill(alerts.length) };
+    }
+    if (t.getTime() - state.sparkHistory.lastT > 5 * 60000 || t.getTime() < state.sparkHistory.lastT) {
+      state.sparkHistory.active.shift(); state.sparkHistory.active.push(active.length);
+      state.sparkHistory.delayed.shift(); state.sparkHistory.delayed.push(delayed.length);
+      state.sparkHistory.secWait.shift(); state.sparkHistory.secWait.push(avgWait);
+      state.sparkHistory.alerts.shift(); state.sparkHistory.alerts.push(alerts.length);
+      state.sparkHistory.lastT = t.getTime();
+    }
 
     const kpis = [
-      { id:'kpiA', label:'Active Flights',   val: active.length,  sparkData: KPI_HISTORY.active,  color:'#7aa55e', sub:`of ${near.length} in window`,              sev: active.length > 5 ? 'sev-nominal' : '' },
-      { id:'kpiD', label:'Delayed ≥30m',     val: delayed.length, sparkData: KPI_HISTORY.delayed, color:'#d87a3d', sub:`${near.length?Math.round(delayed.length/near.length*100):0}% of window`, sev: delayed.length >= 5 ? 'sev-critical' : delayed.length >= 2 ? 'sev-alert' : 'sev-nominal' },
-      { id:'kpiS', label:'Security Wait',    val: avgWait ? avgWait.toFixed(0)+'m':'—', sparkData: KPI_HISTORY.secWait, color:'#5a8fa8', sub:`${secWin.length} screened nearby`, sev: avgWait > 25 ? 'sev-alert' : 'sev-nominal' },
-      { id:'kpiG', label:'Gates Occupied',   val: gatesState(t).filter(g=>g.state!=='idle').length+'/'+GATES.length, sparkData: KPI_HISTORY.active, color:'#c8a25a', sub:'Terminal 3', sev:'' },
+      { id:'kpiA', label:'Active Flights',   val: active.length,  sparkData: state.sparkHistory.active,  color:'#7aa55e', sub:`of ${near.length} in window`,              sev: active.length > 5 ? 'sev-nominal' : '' },
+      { id:'kpiD', label:'Delayed ≥30m',     val: delayed.length, sparkData: state.sparkHistory.delayed, color:'#d87a3d', sub:`${near.length?Math.round(delayed.length/near.length*100):0}% of window`, sev: delayed.length >= 5 ? 'sev-critical' : delayed.length >= 2 ? 'sev-alert' : 'sev-nominal' },
+      { id:'kpiS', label:'Security Wait',    val: avgWait ? avgWait.toFixed(0)+'m':'—', sparkData: state.sparkHistory.secWait, color:'#5a8fa8', sub:`${secWin.length} screened nearby`, sev: avgWait > 25 ? 'sev-alert' : 'sev-nominal' },
+      { id:'kpiG', label:'Gates Occupied',   val: gatesState(t).filter(g=>g.state!=='idle').length+'/'+GATES.length, sparkData: state.sparkHistory.active, color:'#c8a25a', sub:'Terminal 3', sev:'' },
       { id:'kpiR', label:'Retail ±6h',       val: '₹'+Math.round(revenue).toLocaleString('en-IN'), sparkData: null, color:'#c8a25a', sub:`${retailW.length} transactions`, sev:'sev-watch' },
-      { id:'kpiAl',label:'Open Alerts',      val: alerts.length,  sparkData: KPI_HISTORY.alerts,  color: critCount ? '#cf5040' : '#d87a3d', sub:`${critCount} critical`, sev: critCount ? 'sev-critical' : alerts.length ? 'sev-alert' : 'sev-nominal', clickable: true },
+      { id:'kpiAl',label:'Open Alerts',      val: alerts.length,  sparkData: state.sparkHistory.alerts,  color: critCount ? '#cf5040' : '#d87a3d', sub:`${critCount} critical`, sev: critCount ? 'sev-critical' : alerts.length ? 'sev-alert' : 'sev-nominal', clickable: true },
     ];
 
     const strip = document.getElementById('kpiStrip');
@@ -342,8 +354,8 @@
       const changed = prev !== undefined && prev !== vStr;
       _prevKpiVals[k.id] = vStr;
       const colClass = k.sev.includes('critical') ? 'c-critical' : k.sev.includes('alert') ? 'c-alert' : k.sev.includes('watch') ? 'c-watch' : 'c-nominal';
-      const sparkH = k.sparkData ? sparklineSVG(k.sparkData, k.color, 68, 22, hIdx) : '';
-      const trend  = k.sparkData ? trendArrow(k.sparkData, hIdx) : '';
+      const sparkH = k.sparkData ? sparklineSVG(k.sparkData, k.color, 68, 22) : '';
+      const trend  = k.sparkData ? trendArrow(k.sparkData) : '';
       return `
         <div class="kpi ${k.sev}${k.clickable?' clickable':''}" id="${k.id}"
           ${k.clickable ? 'role="button" tabindex="0" aria-label="Open Alerts — jump to incident feed"' : ''}>
@@ -397,7 +409,8 @@
     grid.innerHTML = states.map(g => {
       const label = g.gate.replace(/[A-Z]/g, '');
       const tip   = g.flight ? `${g.gate} · ${g.flight.flight_id} · ${g.flight.origin}→${g.flight.destination} · ${g.state}` : `${g.gate} · idle`;
-      return `<div class="gate-cell" data-state="${g.state}" data-tip="${esc(tip)}" tabindex="0" role="img" aria-label="Gate ${esc(g.gate)}, ${g.state}${g.flight?' — '+esc(g.flight.flight_id):''}">${label}</div>`;
+      const onclick = g.flight ? `openFlightDrawer('${g.flight.flight_id}')` : `showToast('Gate ${g.gate} is currently unoccupied.')`;
+      return `<div class="gate-cell interactive" data-state="${g.state}" data-tip="${esc(tip)}" tabindex="0" role="button" aria-label="Gate ${esc(g.gate)}, ${g.state}${g.flight?' — '+esc(g.flight.flight_id):''}" onclick="${onclick}">${label}</div>`;
     }).join('');
   }
 
@@ -450,56 +463,90 @@
     const upcoming = near.filter(f => (f._actDep||f._schedDep) >= t).slice(0, 10);
     const { cls, icon, label, text } = computeOpsSummary(t);
 
-    el.innerHTML = `
-      <div class="ops-summary ${cls}" role="status" aria-live="polite">
-        <div class="ops-icon" aria-hidden="true">${icon}</div>
-        <div class="ops-text"><div class="ops-label">${label}</div>${text}</div>
-      </div>
-
-      <div class="section-title">Departure Board</div>
-      <div class="section-sub">Next departures at T-3 — click any row to open the full cross-table drill-down. Scrub the timeline to replay any operational window.</div>
-
-      <div class="panel" style="margin-bottom:16px;">
-        <div class="panel-header">
-          <h2>Upcoming Departures</h2>
-          <span class="hint">Terminal 3 · ±window</span>
+    if (el.dataset.initializedTab !== 'overview') {
+      el.innerHTML = `
+        <div class="ops-summary" id="overviewOpsSummary" role="status" aria-live="polite">
+          <div class="ops-icon" aria-hidden="true"></div>
+          <div class="ops-text"><div class="ops-label"></div><span id="overviewOpsText"></span></div>
         </div>
-        <div class="table-wrap">
-          <table class="data" aria-label="Upcoming departures">
-            <thead><tr>
-              <th>Flight</th><th>Route</th><th>Sched.</th><th>Gate</th><th>Risk</th><th>Status</th>
-            </tr></thead>
-            <tbody id="nextDepBody">
-              ${upcoming.map(f => {
-                const sev  = severityOf(f);
-                const risk = predictDelayRisk(f);
-                return `<tr data-flight="${esc(f.flight_id)}" tabindex="0">
-                  <td><b>${esc(f.flight_id)}</b><br><span style="color:var(--ink-faint);font-size:10px;">${esc(f.airline)}</span></td>
-                  <td>${esc(f.origin)} → ${esc(f.destination)}</td>
-                  <td>${fmtTime(f._schedDep)}</td>
-                  <td>${esc(f.gate)}</td>
-                  <td><span class="risk-badge ${risk}" title="Predicted delay risk score">${risk.toUpperCase()}</span></td>
-                  <td>${pillFor(f.delay_min>0?sev:'nominal', f.delay_min>0?'+'+f.delay_min+'m':'On Time')}</td>
-                </tr>`;
-              }).join('') || `<tr><td colspan="6" class="alert-empty">No departures in this window.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-      <!-- Gate Gantt view (§8.1) -->
-      <div class="panel" style="margin-bottom:16px;">
-        <div class="panel-header">
-          <h2>Gate Timeline</h2>
-          <span class="hint">±6h · amber line = now</span>
-        </div>
-        <div class="panel-body" style="padding:10px 8px;">
-          <div class="gantt-wrap" id="ganttWrap"></div>
-        </div>
-      </div>
+        <div class="section-title">Departure Board <span style="font-size:12px;color:var(--sev-alert);border:1px solid var(--sev-alert);padding:2px 6px;border-radius:4px;margin-left:12px;">DEPARTURES</span></div>
+        <div class="section-sub">Next departures at T-3 — mechanical split-flap board shows the next 5 imminent departures. Scrub the timeline to replay any operational window.</div>
 
-      <!-- Fleet snapshot -->
-      <div class="chart-row">
+        <div class="split-flap-board" id="splitFlapBoardOverview" style="margin-bottom:16px;"></div>
+
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-header">
+            <h2>Upcoming Departures</h2>
+            <span class="hint">next 10 scheduled</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data" aria-label="Upcoming departures">
+              <thead><tr><th>Flight</th><th>Route</th><th>Sched. Dep</th><th>Gate</th><th>Delay</th><th>Severity</th></tr></thead>
+              <tbody id="nextDepBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Gate Gantt view (§8.1) -->
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-header">
+            <h2>Gate Timeline</h2>
+            <span class="hint">±6h · amber line = now</span>
+          </div>
+          <div class="panel-body" style="padding:10px 8px;">
+            <div class="gantt-wrap" id="ganttWrap"></div>
+          </div>
+        </div>
+
+        <!-- Fleet snapshot -->
+        <div class="chart-row" id="fleetSnapshotRow"></div>
+      `;
+      el.dataset.initializedTab = 'overview';
+    }
+
+    // Update Ops Summary
+    const opsSummary = document.getElementById('overviewOpsSummary');
+    if (opsSummary) {
+      if (opsSummary.dataset.cls !== cls) {
+        opsSummary.className = 'ops-summary ' + cls;
+        opsSummary.dataset.cls = cls;
+      }
+      const iconEl = opsSummary.querySelector('.ops-icon');
+      if (iconEl.innerHTML !== icon) iconEl.innerHTML = icon;
+      const labelEl = opsSummary.querySelector('.ops-label');
+      if (labelEl.innerHTML !== label) labelEl.innerHTML = label;
+      const textEl = document.getElementById('overviewOpsText');
+      if (textEl.innerHTML !== text) textEl.innerHTML = text;
+    }
+
+    // Update Split Flap
+    drawSplitFlapBoard('splitFlapBoardOverview', 5);
+
+    // Upcoming departures table (DOM diffing)
+    const nextDepBody = document.getElementById('nextDepBody');
+    if (nextDepBody) {
+      const flightSignatures = upcoming.map(f => `${f.flight_id}-${severityOf(f)}-${f.delay_min}`).join(',');
+      if (nextDepBody.dataset.lastSigs !== flightSignatures) {
+        nextDepBody.innerHTML = upcoming.map((f, i) => {
+          const sev = severityOf(f);
+          return `<tr class="stagger-in" style="animation-delay:${i * 0.05}s" tabindex="0" onclick="openFlightDrawer('${f.flight_id}')">
+            <td><b>${esc(f.flight_id)}</b></td>
+            <td>${esc(f.origin)} → ${esc(f.destination)}</td>
+            <td>${fmtDateTime(f._schedDep)}</td>
+            <td>${esc(f.gate)}</td>
+            <td>${f.delay_min > 0 ? '+' + f.delay_min + 'm' : '—'}</td>
+            <td>${pillFor(sev, sev === 'nominal' ? 'Nominal' : sev.charAt(0).toUpperCase() + sev.slice(1))}</td>
+          </tr>`;
+        }).join('') || `<tr><td colspan="6" class="alert-empty">No departures in this window.</td></tr>`;
+        nextDepBody.dataset.lastSigs = flightSignatures;
+      }
+    }
+
+    // Update Fleet Snapshot
+    const fleetRow = document.getElementById('fleetSnapshotRow');
+    if (fleetRow) {
+      const fleetHTML = `
         <div class="panel">
           <div class="panel-header"><h2>Fleet Snapshot</h2><span class="hint">near now</span></div>
           <div class="panel-body">
@@ -516,14 +563,9 @@
             ${delayReasonBars(near)}
           </div>
         </div>
-      </div>
-    `;
-
-    // Staggered row entrance
-    if (!reducedMotion()) {
-      el.querySelectorAll('#nextDepBody tr[data-flight]').forEach((r, i) => { r.classList.add('stagger-in'); r.style.animationDelay = `${Math.min(i*38, 8*38)}ms`; });
+      `;
+      if (fleetRow.innerHTML !== fleetHTML) fleetRow.innerHTML = fleetHTML;
     }
-    el.querySelectorAll('[data-flight]').forEach(r => r.addEventListener('click', () => openFlightDrawer(r.dataset.flight)));
 
     // Render gate Gantt
     const ganttEl = document.getElementById('ganttWrap');
@@ -610,45 +652,169 @@
   // DIGITAL TWIN MAP
   // ──────────────────────────────────────────────────────────────────────────
   function renderMap(el) {
+    if (el.dataset.initialized !== 'true') {
+      const numGates = GATES.length;
+      const initialGatesHTML = GATES.map((g, i) => {
+        const angle = Math.PI * 0.85 - (i / (numGates - 1)) * (Math.PI * 0.70); // from left to right
+        const radius = 250;
+        const cx = 400 + Math.cos(angle) * radius;
+        const cy = 400 - Math.sin(angle) * radius;
+        // Text angle for rotation (outward)
+        const rot = -(angle * 180 / Math.PI) + 90;
+        return `
+          <g transform="translate(${cx}, ${cy})">
+            <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(255,255,255,0.1)" stroke-width="2" transform="rotate(${rot})"/>
+            <circle cx="0" cy="0" r="14" class="map-gate" id="gate-circle-${g}" onclick="window.showToast('Gate ${g} is currently unoccupied.')" style="cursor:pointer; transition: all 0.3s;" />
+            <text x="0" y="4" class="map-gate-text" id="gate-text-${g}" style="font-size: 10px; text-anchor: middle;">${g}</text>
+          </g>
+        `;
+      }).join('');
+
+      el.innerHTML = `
+        <div class="section-title">Digital Twin <span style="font-size:12px;color:var(--sev-watch);border:1px solid var(--sev-watch);padding:2px 6px;border-radius:4px;margin-left:12px;">LIVE</span></div>
+        <div class="section-sub">Real-time abstract representation of Terminal 3 gates and runway.</div>
+        <div class="map-container" style="background: var(--bg-1); border-radius: 8px; border: 1px solid var(--panel-border); margin-top: 16px;">
+          <svg class="map-svg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid meet" id="mapSvg" style="width: 100%; height: 60vh;">
+            <!-- Terminal Arc -->
+            <path d="M 160 400 A 240 240 0 0 1 640 400" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="60" stroke-linecap="round"/>
+            <path d="M 160 400 A 240 240 0 0 1 640 400" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round"/>
+            
+            <!-- Runway -->
+            <line x1="100" y1="650" x2="700" y2="650" stroke="rgba(255,255,255,0.2)" stroke-width="30" stroke-linecap="round" />
+            <line x1="150" y1="650" x2="650" y2="650" stroke="rgba(255,255,255,0.8)" stroke-width="4" stroke-dasharray="20, 20" />
+            <text x="70" y="655" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="14" text-anchor="middle" transform="rotate(-90 70 655)">29R</text>
+            <text x="730" y="655" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="14" text-anchor="middle" transform="rotate(90 730 655)">11L</text>
+            
+            <!-- Tarmac markings -->
+            <path d="M 400 400 L 400 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
+            <path d="M 280 400 L 280 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
+            <path d="M 520 400 L 520 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
+
+            <g id="mapLinesLayer"></g>
+            <g id="mapGatesLayer">${initialGatesHTML}</g>
+            <g id="mapPlanesLayer"></g>
+          </svg>
+        </div>
+      `;
+      el.dataset.initialized = 'true';
+    }
+
     const t = state.simTime;
-    const activeFlights = flightsNear(t, 2, 2).filter(f => flightStatusAt(f, t).code === 'boarding' || (flightStatusAt(f, t).code === 'airborne' && f._actDep > t));
     
-    // Draw Terminal 3 spine
-    // Concourse layout: a central spine with gates on left (even) and right (odd).
-    const gatesHTML = GATES.map((g, i) => {
-      const isRight = i % 2 === 1;
-      const row = Math.floor(i / 2);
-      const x = isRight ? 430 : 370;
-      const y = 80 + row * 40;
-      
-      const occ = activeFlights.find(f => f.gate === g);
-      let cls = 'map-gate', txtCls = 'map-gate-text', glow = '';
-      if (occ) {
-        const sev = severityOf(occ);
-        glow = 'glow-' + sev;
-        cls += ' ' + glow;
+    // Find flights that are currently boarding, or have departed within the last 15 minutes (for taxiing animation).
+    const mapFlights = flightsNear(t, 2, 2).filter(f => {
+      const dep = f._actDep || f._schedDep;
+      const boardStart = new Date(dep.getTime() - BOARD_LEAD * 60000);
+      const isBoarding = t >= boardStart && t < dep;
+      const isTaxiing = t >= dep && t < new Date(dep.getTime() + 15 * 60000);
+      return isBoarding || isTaxiing;
+    });
+
+    GATES.forEach((g) => {
+      // Find the flight boarding at this gate.
+      const occ = mapFlights.find(f => {
+        const dep = f._actDep || f._schedDep;
+        return f.gate === g && t < dep;
+      });
+      const c = document.getElementById('gate-circle-' + g);
+      const tEl = document.getElementById('gate-text-' + g);
+      if (c && tEl) {
+        if (occ) {
+          const sev = severityOf(occ);
+          c.setAttribute('class', 'map-gate glow-' + sev);
+          c.setAttribute('onclick', `openFlightDrawer('${occ.flight_id}')`);
+          tEl.style.fill = '#111';
+          tEl.style.fontWeight = 'bold';
+        } else {
+          c.setAttribute('class', 'map-gate');
+          c.setAttribute('onclick', `showToast('Gate ${g} is currently unoccupied.')`);
+          tEl.style.fill = '';
+          tEl.style.fontWeight = '';
+        }
       }
-      return `
-        <g transform="translate(${x}, ${y})">
-          <line x1="${isRight ? -30 : 30}" y1="0" x2="0" y2="0" stroke="rgba(255,255,255,0.1)" stroke-width="2"/>
-          <circle cx="0" cy="0" r="14" class="${cls}" onclick="window.showFlight('${occ ? occ.flight_id : ''}')" />
-          <text x="0" y="1" class="${txtCls}" ${occ ? 'style="fill:#111;font-weight:bold;"' : ''}>${g}</text>
+    });
+
+    const planesLayer = document.getElementById('mapPlanesLayer');
+    if (!planesLayer) return;
+
+    let planesHTML = '';
+    const numGates = GATES.length;
+    mapFlights.forEach(f => {
+      const gateIdx = GATES.indexOf(f.gate);
+      if (gateIdx < 0) return;
+      
+      const angle = Math.PI * 0.85 - (gateIdx / (numGates - 1)) * (Math.PI * 0.70);
+      const radius = 250;
+      const gateX = 400 + Math.cos(angle) * radius;
+      const gateY = 400 - Math.sin(angle) * radius;
+      
+      const dep = f._actDep || f._schedDep;
+      
+      let px = gateX;
+      let py = gateY;
+      let rot = -(angle * 180 / Math.PI) + 90;
+      let opacity = 1;
+      let scale = 1;
+
+      if (t >= dep) {
+        // Taxiing from gate to runway (15 mins = 900,000 ms)
+        const progress = (t - dep) / (15 * 60000);
+        if (progress > 1) return; // Gone
+        
+        // Taxi path: back out of gate, turn towards runway, taxi down to runway, then accelerate right.
+        if (progress < 0.2) {
+          // Pushback
+          const p = progress / 0.2;
+          px = gateX + Math.cos(angle) * (50 * p);
+          py = gateY - Math.sin(angle) * (50 * p);
+        } else if (progress < 0.8) {
+          // Taxi to runway
+          const p = (progress - 0.2) / 0.6;
+          const startX = gateX + Math.cos(angle) * 50;
+          const startY = gateY - Math.sin(angle) * 50;
+          const endX = 200 + gateIdx * 15; // spread them out on runway
+          const endY = 650;
+          px = startX + (endX - startX) * p;
+          py = startY + (endY - startY) * p;
+          rot = Math.atan2(endY - startY, endX - startX) * 180 / Math.PI + 90;
+        } else {
+          // Takeoff roll
+          const p = (progress - 0.8) / 0.2;
+          const startX = 200 + gateIdx * 15;
+          const startY = 650;
+          const endX = 900;
+          const endY = 650;
+          px = startX + (endX - startX) * Math.pow(p, 2); // accelerate
+          py = startY;
+          rot = 90; // Face right
+          if (p > 0.5) {
+            scale = 1 + (p - 0.5) * 2; // lift off
+            opacity = 1 - (p - 0.5) * 2; // fade out
+            py -= (p - 0.5) * 100; // climb
+          }
+        }
+      }
+
+      const sev = severityOf(f);
+      let color = 'var(--ink-subtle)';
+      if (sev === 'critical') color = 'var(--sev-critical)';
+      else if (sev === 'alert') color = 'var(--sev-alert)';
+      else if (sev === 'watch') color = 'var(--sev-watch)';
+      else if (sev === 'nominal') color = 'var(--brand)';
+
+      // Draw a simple plane SVG
+      planesHTML += `
+        <g transform="translate(${px}, ${py}) rotate(${rot}) scale(${scale})" opacity="${opacity}" style="pointer-events: none; transition: transform 0.5s linear;">
+          <path d="M0,-14 L4,-2 L18,-2 L18,1 L4,3 L2,14 L8,18 L8,20 L0,18 L-8,20 L-8,18 L-2,14 L-4,3 L-18,1 L-18,-2 L-4,-2 Z" fill="${color}" stroke="#111" stroke-width="1.5"/>
+          ${t < dep ? `<text x="0" y="-22" fill="${color}" font-family="var(--font-mono)" font-size="12" text-anchor="middle" transform="rotate(${-rot})">${f.flight_id}</text>` : ''}
         </g>
       `;
-    }).join('');
+    });
 
-    el.innerHTML = `
-      <div class="section-title">Digital Twin <span style="font-size:12px;color:var(--sev-watch);border:1px solid var(--sev-watch);padding:2px 6px;border-radius:4px;margin-left:12px;">LIVE</span></div>
-      <div class="section-sub">Real-time SVG rendering of Terminal 3 structural topology. Gates pulse with severity color when an assigned flight experiences a critical delay or boarding conflict.</div>
-      <div class="map-container">
-        <svg class="map-svg" viewBox="0 0 800 1200" preserveAspectRatio="xMidYMid meet">
-          <!-- Main Concourse Spine -->
-          <rect x="380" y="60" width="40" height="${(GATES.length/2)*40 + 40}" class="map-term" rx="10"/>
-          <!-- Gates -->
-          ${gatesHTML}
-        </svg>
-      </div>
-    `;
+    const linesLayer = document.getElementById('mapLinesLayer');
+    if (linesLayer) linesLayer.innerHTML = '';
+    
+    planesLayer.innerHTML = planesHTML;
   }
 
   function renderFlights(el) {
@@ -721,43 +887,46 @@
     }).sort((a,b) => { const k=state.flightSort.key, d=state.flightSort.dir; return (a[k]>b[k]?1:a[k]<b[k]?-1:0)*d; });
   }
 
-  function drawFlightsBody() {
-    const board = document.getElementById('splitFlapBoard');
-    if (board) {
-      const t = state.simTime;
-      const upNext = flights.filter(f => {
-        const s = flightStatusAt(f, t).code;
-        return (s === 'scheduled' || s === 'boarding' || s === 'taxing') && f._actDep > t;
-      }).sort((a,b) => a._actDep - b._actDep).slice(0, 5);
+  function drawSplitFlapBoard(boardId, limit) {
+    const board = document.getElementById(boardId);
+    if (!board) return;
+    const t = state.simTime;
+    const upNext = flights.filter(f => {
+      const s = flightStatusAt(f, t).code;
+      return (s === 'scheduled' || s === 'boarding' || s === 'taxing') && f._actDep > t;
+    }).sort((a,b) => a._actDep - b._actDep).slice(0, limit);
+    
+    const newBoardHTML = upNext.map(f => {
+      const time = fmtDateTime(f._actDep).split(' ')[1] || '00:00'; 
+      const flId = (f.flight_id).padEnd(6, ' ').substring(0, 6);
+      const dest = (f.destination).padEnd(12, ' ').substring(0, 12);
+      const gate = (f.gate).padEnd(3, ' ').substring(0, 3);
+      const stat = (flightStatusAt(f, t).label).padEnd(8, ' ').substring(0, 8);
+      const sev = severityOf(f);
+      const colorClass = sev !== 'nominal' ? ' glow-' + sev : '';
       
-      const newBoardHTML = upNext.map(f => {
-        const time = fmtDateTime(f._actDep).split(' ')[1] || '00:00'; 
-        const flId = (f.flight_id).padEnd(6, ' ').substring(0, 6);
-        const dest = (f.destination).padEnd(12, ' ').substring(0, 12);
-        const gate = (f.gate).padEnd(3, ' ').substring(0, 3);
-        const stat = (flightStatusAt(f, t).label).padEnd(8, ' ').substring(0, 8);
-        const sev = severityOf(f);
-        const colorClass = sev !== 'nominal' ? ' glow-' + sev : '';
-        
-        const rowStr = (time + ' ' + flId + ' ' + dest + ' ' + gate + ' ' + stat).toUpperCase();
-        const chars = rowStr.split('').map(c => 
-          `<div class="sf-char${colorClass}">${c}</div>`
-        ).join('');
-        
-        return `<div class="sf-row" onclick="window.showFlight('${esc(f.flight_id)}')">${chars}</div>`;
-      }).join('');
+      const rowStr = (time + ' ' + flId + ' ' + dest + ' ' + gate + ' ' + stat).toUpperCase();
+      const chars = rowStr.split('').map(c => 
+        `<div class="sf-char${colorClass}">${c}</div>`
+      ).join('');
       
-      if (board.innerHTML !== newBoardHTML) {
-         board.innerHTML = newBoardHTML;
-         // Trigger animation on children
-         const chars = board.querySelectorAll('.sf-char');
-         chars.forEach(c => {
-           c.classList.remove('sf-flip');
-           void c.offsetWidth; // trigger reflow
-           c.classList.add('sf-flip');
-         });
-      }
+      return `<div class="sf-row" onclick="window.showFlight('${esc(f.flight_id)}')">${chars}</div>`;
+    }).join('');
+    
+    if (board.innerHTML !== newBoardHTML) {
+       board.innerHTML = newBoardHTML;
+       // Trigger animation on children
+       const chars = board.querySelectorAll('.sf-char');
+       chars.forEach(c => {
+         c.classList.remove('sf-flip');
+         void c.offsetWidth; // trigger reflow
+         c.classList.add('sf-flip');
+       });
     }
+  }
+
+  function drawFlightsBody() {
+    drawSplitFlapBoard('splitFlapBoard', 5);
 
     const body = document.getElementById('flightsBody'), cards = document.getElementById('flightsCardList');
     if (!body && !cards) return;
@@ -1289,6 +1458,13 @@
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
+  const splashBtn = document.getElementById('btnEnterSplash');
+  if (splashBtn) {
+    splashBtn.addEventListener('click', () => {
+      document.getElementById('splashScreen').classList.add('hidden');
+    });
+  }
+
   tick();
   requestAnimationFrame(loop);
 

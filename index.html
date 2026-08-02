@@ -14,7 +14,26 @@
 </head>
 <body>
 
-<!-- Skip navigation for keyboard users (§11) -->
+<!-- Splash Screen / Pre-load (§3.1) -->
+<div id="splashScreen" class="splash-screen" role="dialog" aria-modal="true" aria-label="Welcome to DEL Ops">
+  <div class="splash-content">
+    <div class="splash-logo">
+      <svg viewBox="0 0 100 100" width="80" height="80" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="45" fill="none" stroke="var(--ink-mid)" stroke-width="2" opacity="0.3"/>
+        <circle cx="50" cy="50" r="30" fill="none" stroke="var(--ink-mid)" stroke-width="2" opacity="0.5"/>
+        <line x1="50" y1="5" x2="50" y2="95" stroke="var(--ink-mid)" opacity="0.5"/>
+        <line x1="5" y1="50" x2="95" y2="50" stroke="var(--ink-mid)" opacity="0.5"/>
+        <path d="M50 50 L85 15" stroke="var(--brand)" stroke-width="3" stroke-linecap="round">
+          <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="4s" repeatCount="indefinite"/>
+        </path>
+        <path d="M48 60 L50 40 L58 48 L65 47 L70 50 L65 53 L58 52 L50 60 Z" fill="var(--brand)" transform="rotate(-45 50 50) translate(-10, -5)"/>
+      </svg>
+    </div>
+    <h1 class="splash-title">DEL Ops Control</h1>
+    <p class="splash-subtitle">Indira Gandhi International Airport · Terminal 3</p>
+    <button class="splash-btn" id="btnEnterSplash">Enter Control Center</button>
+  </div>
+</div><!-- Skip navigation for keyboard users (§11) -->
 <a class="skip-link" href="#mainCol">Skip to main content</a>
 
 <!-- Toast container (§9.2) -->
@@ -42,7 +61,15 @@
   <!-- ===== Identity + Clock + Crisis button ===== -->
   <header class="topbar" role="banner">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true">DEL</div>
+      <div class="brand-mark" aria-hidden="true" style="padding: 4px; display: flex; align-items: center; justify-content: center; background: rgba(200, 162, 90, 0.1);">
+        <svg viewBox="0 0 100 100" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="45" fill="none" stroke="var(--brand)" stroke-width="6" opacity="0.4"/>
+          <path d="M50 50 L85 15" stroke="var(--brand)" stroke-width="8" stroke-linecap="round">
+            <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="4s" repeatCount="indefinite"/>
+          </path>
+          <path d="M48 60 L50 40 L58 48 L65 47 L70 50 L65 53 L58 52 L50 60 Z" fill="var(--brand)" transform="rotate(-45 50 50) translate(-10, -5)"/>
+        </svg>
+      </div>
       <div class="brand-text">
         <h1>Ops Control</h1>
         <p>Indira Gandhi Intl · Terminal 3</p>

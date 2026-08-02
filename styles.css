@@ -84,6 +84,32 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 
 
 /* ══════════════════════════════════════════
+   SPLASH SCREEN
+══════════════════════════════════════════ */
+.splash-screen {
+  position: fixed; inset: 0; z-index: 9999;
+  background: radial-gradient(circle at center, #1a2235 0%, var(--bg) 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  transition: opacity 0.6s ease, visibility 0.6s;
+}
+.splash-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+.splash-content { text-align: center; animation: fadeUp 1s cubic-bezier(0.1, 0.9, 0.2, 1) forwards; }
+.splash-logo { margin-bottom: 24px; display: inline-flex; justify-content: center; }
+.splash-title { font-family: var(--font-disp); font-size: 32px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink); margin: 0 0 8px 0; }
+.splash-subtitle { font-size: 14px; color: var(--ink-subtle); margin: 0 0 32px 0; }
+.splash-btn {
+  background: rgba(200, 162, 90, 0.15); border: 1px solid var(--brand); color: var(--brand);
+  padding: 12px 24px; font-size: 14px; border-radius: 6px; cursor: pointer;
+  transition: all 0.2s; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em;
+}
+.splash-btn:hover { background: var(--brand); color: #000; box-shadow: 0 0 20px rgba(200,162,90,0.4); }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ══════════════════════════════════════════
    TOPBAR
 ══════════════════════════════════════════ */
 .topbar {
@@ -386,8 +412,10 @@ table.data tbody tr:last-child td { border-bottom: none; }
   aspect-ratio: 1; border-radius: 5px; border: 1px solid var(--panel-hair-strong);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: 9px; font-weight: 600; color: var(--ink-faint);
-  background: var(--panel-2); position: relative; cursor: default; transition: transform .08s;
+  background: var(--panel-2); position: relative; cursor: default; transition: transform .08s, box-shadow .08s;
 }
+.gate-cell.interactive { cursor: pointer; }
+.gate-cell.interactive:hover { transform: scale(1.08); box-shadow: 0 4px 12px rgba(0,0,0,0.5); border-color: var(--ink-mid); z-index: 10; }
 .gate-cell[data-state="occupied"] { background: var(--sev-nominal-bg); border-color: rgba(122,165,94,.35); color: var(--sev-nominal); }
 .gate-cell[data-state="boarding"] { background: var(--sev-watch-bg); border-color: rgba(200,162,90,.35); color: var(--sev-watch); }
 .gate-cell[data-state="conflict"] { background: var(--sev-critical-bg); border-color: var(--sev-critical); color: var(--sev-critical); animation: conflictPulse 1.8s ease-in-out infinite; }
@@ -567,6 +595,38 @@ table.data tbody tr:last-child td { border-bottom: none; }
   transition: transform .28s cubic-bezier(.16,.82,.28,1), opacity .28s;
   pointer-events: auto;
 }
+.toast  .sf-char.flipped { transform: rotateX(-180deg); opacity: 0; }
+  
+  /* ── Map Route Flow Lines ── */
+  .route-line {
+    stroke-dasharray: 10 10;
+    animation: route-flow 2s linear infinite;
+    opacity: 0.6;
+  }
+  @keyframes route-flow {
+    from { stroke-dashoffset: 20; }
+    to { stroke-dashoffset: 0; }
+  }
+  .route-nominal { stroke: var(--sev-nominal); }
+  .route-watch { stroke: var(--sev-watch); opacity: 0.8; stroke-width: 3px; }
+  .route-alert { stroke: var(--sev-alert); opacity: 1; stroke-width: 4px; filter: drop-shadow(0 0 4px var(--sev-alert)); }
+  
+  .route-chip {
+    fill: rgba(20, 25, 32, 0.9);
+    stroke: rgba(255, 255, 255, 0.1);
+    stroke-width: 1px;
+    rx: 4px;
+  }
+  .route-chip-text {
+    fill: #fff;
+    font-size: 10px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+  }
+  .route-chip-time {
+    fill: rgba(255, 255, 255, 0.6);
+    font-size: 9px;
+  }
 .toast.show { transform: translateX(0); opacity: 1; }
 .toast.hide { transform: translateX(calc(100% + 20px)); opacity: 0; }
 .toast.t-critical { border-left: 3px solid var(--sev-critical); }
