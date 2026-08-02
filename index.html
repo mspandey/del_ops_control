@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DEL Ops — Airport Operations Control Center</title>
+  <meta name="description" content="Real-time Airport Operations Control Center for Indira Gandhi International Airport (DEL) — flights, gates, baggage, passengers, security, staff and maintenance in one unified operational view.">
+  <meta name="theme-color" content="#0b0e14">
+  <!-- Open Graph -->
+  <meta property="og:title" content="DEL Ops Control Center">
+  <meta property="og:description" content="Unified real-time ops dashboard for Indira Gandhi International — 8-table cross-linked intelligence.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Skip navigation for keyboard users (§11) -->
+<a class="skip-link" href="#mainCol">Skip to main content</a>
+
+<!-- Toast container (§9.2) -->
+<div id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- Command Palette (§2.3 — ⌘K) -->
+<div class="cmd-backdrop" id="cmdBackdrop" role="dialog" aria-modal="true" aria-label="Command palette — search flights, passengers and gates">
+  <div class="cmd-palette" id="cmdPalette">
+    <input class="cmd-input" id="cmdInput" type="search"
+      placeholder="Search flights, passengers, airlines, routes…"
+      autocomplete="off" spellcheck="false"
+      aria-label="Search command palette"
+      aria-autocomplete="list" aria-controls="cmdResults">
+    <div class="cmd-results" id="cmdResults" role="listbox" aria-label="Search results"></div>
+    <div class="cmd-hint" aria-hidden="true">
+      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+      <span><kbd>Enter</kbd> open</span>
+      <span><kbd>Esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+
+  <!-- ===== Identity + Clock + Crisis button ===== -->
+  <header class="topbar" role="banner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">DEL</div>
+      <div class="brand-text">
+        <h1>Ops Control</h1>
+        <p>Indira Gandhi Intl · Terminal 3</p>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <!-- Crisis demo scenario (§4.1) -->
+      <button class="btn-crisis" id="btnCrisis"
+        aria-label="Load crisis demo scenario — jump to the worst operational moment in the dataset"
+        title="Jumps to the auto-detected worst alert moment across the dataset">
+        ⚠ Load Crisis Demo
+      </button>
+
+      <!-- Command Palette trigger -->
+      <button class="btn-cmd" id="btnCmd"
+        aria-label="Open command palette — search flights and passengers"
+        title="Open command palette (Ctrl+K / ⌘K)">
+        Search <kbd>⌘K</kbd>
+      </button>
+
+      <!-- Live clock -->
+      <div class="airport-clock" aria-label="Operational time display">
+        <span class="live-dot" id="liveDot" aria-hidden="true"></span>
+        <div class="clock-readout" aria-live="polite" aria-atomic="true">
+          <div class="date mono" id="clockDate">—</div>
+          <div class="time mono" id="clockTime">00:00:00</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== Timeline Scrubber (§5.2) ===== -->
+  <div class="scrubber" role="region" aria-label="Timeline scrubber — replay any moment in the Oct–Dec 2024 operational dataset">
+    <div class="transport-controls">
+      <button class="tc-btn" id="btnPlay" aria-label="Play simulation" aria-pressed="false" title="Play / Pause (Space)">▶</button>
+      <button class="tc-btn" id="btnReset" aria-label="Jump to busiest day at 06:00" title="Jump to 22 Oct 2024 at 06:00">⟲</button>
+      <div class="speed-group" role="group" aria-label="Playback speed">
+        <button class="speed-btn" data-speed="15"  aria-label="15× playback speed">15×</button>
+        <button class="speed-btn is-active" data-speed="60"  aria-pressed="true" aria-label="60× playback speed (active)">60×</button>
+        <button class="speed-btn" data-speed="240" aria-label="240× playback speed">240×</button>
+        <button class="speed-btn" data-speed="900" aria-label="900× playback speed">900×</button>
+      </div>
+    </div>
+    <div class="range-wrap">
+      <input type="range" class="scrub" id="scrubRange"
+        min="0" max="1000" value="0"
+        aria-label="Scrub operational timeline — October to December 2024"
+        aria-valuemin="0" aria-valuemax="1000">
+    </div>
+    <div class="scrub-labels mono">
+      <span id="scrubHint" aria-live="polite" aria-atomic="true">drag to scrub any date</span>
+    </div>
+  </div>
+
+  <!-- ===== KPI Strip (§5.3 + sparklines §1.3) ===== -->
+  <div class="kpi-strip" id="kpiStrip"
+    aria-live="polite"
+    aria-label="Key operational metrics — updates with simulation time"
+    role="region"></div>
+
+  <!-- ===== Tab Navigation (§4) ===== -->
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Operational views">
+    <button class="tab-btn is-active" data-tab="overview"    role="tab" aria-selected="true"  aria-controls="mainCol" id="tab-overview">Overview</button>
+    <button class="tab-btn"           data-tab="flights"     role="tab" aria-selected="false" aria-controls="mainCol" id="tab-flights">Flights <span class="count" aria-hidden="true">1000</span></button>
+    <button class="tab-btn"           data-tab="trace"       role="tab" aria-selected="false" aria-controls="mainCol" id="tab-trace">Passenger Trace</button>
+    <button class="tab-btn"           data-tab="security"    role="tab" aria-selected="false" aria-controls="mainCol" id="tab-security">Security</button>
+    <button class="tab-btn"           data-tab="staff"       role="tab" aria-selected="false" aria-controls="mainCol" id="tab-staff">Staff</button>
+    <button class="tab-btn"           data-tab="retail"      role="tab" aria-selected="false" aria-controls="mainCol" id="tab-retail">Retail</button>
+    <button class="tab-btn"           data-tab="maintenance" role="tab" aria-selected="false" aria-controls="mainCol" id="tab-maintenance">Maintenance</button>
+  </nav>
+
+  <!-- ===== Workspace ===== -->
+  <div class="workspace">
+    <main class="main-col" id="mainCol" role="tabpanel" aria-live="polite" aria-label="Main operational view"></main>
+
+    <!-- ===== Right Rail ===== -->
+    <aside class="side-col" aria-label="Live incident feed and gate status">
+
+      <!-- Incident Feed -->
+      <section class="panel" aria-labelledby="incidentFeedTitle">
+        <div class="panel-header">
+          <h2 id="incidentFeedTitle">Live Incident Feed</h2>
+          <span class="hint mono" id="alertCount" aria-live="polite">0 open</span>
+        </div>
+        <div class="panel-body" id="alertFeed"
+          role="list"
+          aria-live="polite"
+          aria-label="Active incidents ranked by severity"
+          style="max-height:340px;overflow-y:auto;"></div>
+      </section>
+
+      <!-- Gate Grid -->
+      <section class="panel" aria-labelledby="gateGridTitle">
+        <div class="panel-header">
+          <h2 id="gateGridTitle">Terminal 3 Gates</h2>
+          <span class="hint">at current time</span>
+        </div>
+        <div class="panel-body">
+          <div class="gate-grid" id="gateGrid" role="group" aria-label="Gate occupancy grid — hover or focus each gate for flight details"></div>
+          <div class="gate-legend" aria-label="Gate status legend">
+            <span><span style="color:var(--sev-nominal)"  aria-hidden="true">●</span> occupied</span>
+            <span><span style="color:var(--sev-watch)"    aria-hidden="true">●</span> boarding</span>
+            <span><span style="color:var(--sev-critical)" aria-hidden="true">●</span> conflict</span>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- ===== Footer ===== -->
+  <footer class="app-footer" role="contentinfo">
+    <span>Frontend Wars 2026 · Grand Finale · DEL Airport Operations Control Center</span>
+    <span class="mono">Oct–Dec 2024 dataset · client-side only · no backend</span>
+  </footer>
+
+</div><!-- /#app -->
+
+<!-- ===== Flight Detail Drawer (§5.10 — 5-table cross-join) ===== -->
+<div class="drawer-scrim" id="drawerScrim" aria-hidden="true"></div>
+<div class="drawer" id="drawer"
+  role="dialog" aria-modal="true"
+  aria-labelledby="drawerTitle"
+  aria-describedby="drawerSub">
+  <div class="drawer-head">
+    <div>
+      <h3 id="drawerTitle">—</h3>
+      <div class="sub" id="drawerSub">—</div>
+    </div>
+    <button class="drawer-close" id="drawerClose" aria-label="Close flight detail panel">✕</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</div>
+
+<!-- ===== No-JS fallback ===== -->
+<noscript>
+  <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0e14;color:#f2ede4;font-family:system-ui,sans-serif;text-align:center;padding:40px;">
+    <div>
+      <h2 style="font-size:20px;margin-bottom:12px;">JavaScript required</h2>
+      <p style="color:#a8a49c;">DEL Ops Control Center requires JavaScript. Please enable it in your browser settings.</p>
+    </div>
+  </div>
+</noscript>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
