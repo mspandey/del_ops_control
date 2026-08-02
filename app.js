@@ -437,7 +437,7 @@
   // TABS
   // ════════════════════════════════════════════════════════════════════════
 
-  const TAB_RENDER = { overview: renderOverview, flights: renderFlights, trace: renderTrace, security: renderSecurity, staff: renderStaff, retail: renderRetail, maintenance: renderMaintenance };
+  const TAB_RENDER = { overview: renderOverview, map: renderMap, flights: renderFlights, trace: renderTrace, security: renderSecurity, staff: renderStaff, retail: renderRetail, maintenance: renderMaintenance };
   function renderTab() { TAB_RENDER[state.tab](document.getElementById('mainCol')); }
 
 
@@ -606,11 +606,59 @@
   // ──────────────────────────────────────────────────────────────────────────
   // FLIGHTS TAB  (§5.5)
   // ──────────────────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────────
+  // DIGITAL TWIN MAP
+  // ──────────────────────────────────────────────────────────────────────────
+  function renderMap(el) {
+    const t = state.simTime;
+    const activeFlights = flightsNear(t, 2, 2).filter(f => flightStatusAt(f, t).code === 'boarding' || (flightStatusAt(f, t).code === 'airborne' && f._actDep > t));
+    
+    // Draw Terminal 3 spine
+    // Concourse layout: a central spine with gates on left (even) and right (odd).
+    const gatesHTML = GATES.map((g, i) => {
+      const isRight = i % 2 === 1;
+      const row = Math.floor(i / 2);
+      const x = isRight ? 430 : 370;
+      const y = 80 + row * 40;
+      
+      const occ = activeFlights.find(f => f.gate === g);
+      let cls = 'map-gate', txtCls = 'map-gate-text', glow = '';
+      if (occ) {
+        const sev = severityOf(occ);
+        glow = 'glow-' + sev;
+        cls += ' ' + glow;
+      }
+      return `
+        <g transform="translate(${x}, ${y})">
+          <line x1="${isRight ? -30 : 30}" y1="0" x2="0" y2="0" stroke="rgba(255,255,255,0.1)" stroke-width="2"/>
+          <circle cx="0" cy="0" r="14" class="${cls}" onclick="window.showFlight('${occ ? occ.flight_id : ''}')" />
+          <text x="0" y="1" class="${txtCls}" ${occ ? 'style="fill:#111;font-weight:bold;"' : ''}>${g}</text>
+        </g>
+      `;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="section-title">Digital Twin <span style="font-size:12px;color:var(--sev-watch);border:1px solid var(--sev-watch);padding:2px 6px;border-radius:4px;margin-left:12px;">LIVE</span></div>
+      <div class="section-sub">Real-time SVG rendering of Terminal 3 structural topology. Gates pulse with severity color when an assigned flight experiences a critical delay or boarding conflict.</div>
+      <div class="map-container">
+        <svg class="map-svg" viewBox="0 0 800 1200" preserveAspectRatio="xMidYMid meet">
+          <!-- Main Concourse Spine -->
+          <rect x="380" y="60" width="40" height="${(GATES.length/2)*40 + 40}" class="map-term" rx="10"/>
+          <!-- Gates -->
+          ${gatesHTML}
+        </svg>
+      </div>
+    `;
+  }
+
   function renderFlights(el) {
     el.innerHTML = `
-      <div class="section-title">Flight Board</div>
-      <div class="section-sub">${flights.length.toLocaleString()} scheduled movements. Filter by severity or route type, click any row to drill into the cross-table detail. Flights with open maintenance WOs carry a HIGH risk badge.</div>
-      <div class="toolbar">
+      <div class="section-title">Flight Board <span style="font-size:12px;color:var(--sev-alert);border:1px solid var(--sev-alert);padding:2px 6px;border-radius:4px;margin-left:12px;">DEPARTURES</span></div>
+      <div class="section-sub">${flights.length.toLocaleString()} scheduled movements. Mechanical split-flap board shows the next 5 imminent departures. Filter below to explore the full manifest.</div>
+      
+      <div class="split-flap-board" id="splitFlapBoard"></div>
+      
+      <div class="toolbar" style="margin-top:24px;">
         <input class="input" id="flQ" placeholder="Search flight, airline, route, tail…" value="${esc(state.flightFilter.q)}" autocomplete="off" aria-label="Search flights">
         <select class="select" id="flStatus" aria-label="Filter by severity">
           <option value="">All severities</option>
@@ -674,6 +722,43 @@
   }
 
   function drawFlightsBody() {
+    const board = document.getElementById('splitFlapBoard');
+    if (board) {
+      const t = state.simTime;
+      const upNext = flights.filter(f => {
+        const s = flightStatusAt(f, t).code;
+        return (s === 'scheduled' || s === 'boarding' || s === 'taxing') && f._actDep > t;
+      }).sort((a,b) => a._actDep - b._actDep).slice(0, 5);
+      
+      const newBoardHTML = upNext.map(f => {
+        const time = fmtDateTime(f._actDep).split(' ')[1] || '00:00'; 
+        const flId = (f.flight_id).padEnd(6, ' ').substring(0, 6);
+        const dest = (f.destination).padEnd(12, ' ').substring(0, 12);
+        const gate = (f.gate).padEnd(3, ' ').substring(0, 3);
+        const stat = (flightStatusAt(f, t).label).padEnd(8, ' ').substring(0, 8);
+        const sev = severityOf(f);
+        const colorClass = sev !== 'nominal' ? ' glow-' + sev : '';
+        
+        const rowStr = (time + ' ' + flId + ' ' + dest + ' ' + gate + ' ' + stat).toUpperCase();
+        const chars = rowStr.split('').map(c => 
+          `<div class="sf-char${colorClass}">${c}</div>`
+        ).join('');
+        
+        return `<div class="sf-row" onclick="window.showFlight('${esc(f.flight_id)}')">${chars}</div>`;
+      }).join('');
+      
+      if (board.innerHTML !== newBoardHTML) {
+         board.innerHTML = newBoardHTML;
+         // Trigger animation on children
+         const chars = board.querySelectorAll('.sf-char');
+         chars.forEach(c => {
+           c.classList.remove('sf-flip');
+           void c.offsetWidth; // trigger reflow
+           c.classList.add('sf-flip');
+         });
+      }
+    }
+
     const body = document.getElementById('flightsBody'), cards = document.getElementById('flightsCardList');
     if (!body && !cards) return;
     const rows = filteredFlights().slice(0, 300);

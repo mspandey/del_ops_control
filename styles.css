@@ -45,6 +45,7 @@ body {
   background: var(--bg); color: var(--ink);
   font-family: var(--font-sans); font-size: var(--t-base); line-height: var(--lh-base);
   -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  background-image: radial-gradient(circle at 50% -20%, rgba(90, 143, 168, 0.1), transparent 50%), radial-gradient(circle at 100% 50%, rgba(200, 162, 90, 0.05), transparent 40%);
 }
 
 /* ── Scanline texture motif (ops-room identity) ── */
@@ -259,9 +260,9 @@ input[type="range"].scrub::-webkit-slider-thumb:active { cursor: grabbing; trans
 
 
 /* ══════════════════════════════════════════
-   PANELS
+   PANELS & COMPONENTS
 ══════════════════════════════════════════ */
-.panel { background: var(--panel); border: 1px solid var(--panel-hair); border-radius: var(--r); box-shadow: var(--shadow-panel); }
+.panel { background: rgba(20, 25, 32, 0.65); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid var(--panel-hair); border-radius: var(--r); box-shadow: var(--shadow-panel); }
 .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--panel-hair); }
 .panel-header h2 { font-size: var(--t-sm); font-weight: 600; letter-spacing: .02em; }
 .panel-header .hint { font-size: var(--t-xs); color: var(--ink-faint); font-family: var(--font-mono); }
@@ -635,3 +636,94 @@ footer.app-footer {
   .drawer.is-open { transform: translateY(0); }
   .btn-crisis { display: none; }
 }
+
+/* ══════════════════════════════════════════
+   DIGITAL TWIN (MAP)
+══════════════════════════════════════════ */
+.map-container {
+  width: 100%;
+  height: calc(100vh - 200px);
+  background: rgba(11, 14, 20, 0.4);
+  backdrop-filter: blur(10px);
+  border-radius: var(--r);
+  border: 1px solid var(--panel-hair);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(0,0,0,0.5) inset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.map-svg {
+  width: 95%;
+  height: 95%;
+  filter: drop-shadow(0 0 10px rgba(90,143,168,0.15));
+}
+.map-term { fill: rgba(255,255,255,0.02); stroke: rgba(255,255,255,0.06); stroke-width: 1; }
+.map-gate { fill: #000; stroke: rgba(255,255,255,0.1); stroke-width: 1; transition: fill 0.2s, filter 0.2s; cursor: pointer; }
+.map-gate:hover { filter: brightness(1.5); }
+.map-gate-text { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 5px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; user-select: none; }
+.map-aircraft { transition: all 0.3s ease; }
+.map-aircraft-icon { fill: var(--ink); filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+
+/* ══════════════════════════════════════════
+   SPLIT-FLAP BOARD
+══════════════════════════════════════════ */
+.split-flap-board {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: transparent;
+  padding: 0;
+}
+.sf-row {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  cursor: pointer;
+}
+.sf-row:hover .sf-char {
+  border-color: rgba(255,255,255,0.15);
+}
+.sf-char {
+  background: #11151c;
+  color: #f2ede4;
+  font-family: var(--font-mono);
+  font-size: var(--t-md);
+  font-weight: 700;
+  height: 32px;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  border: 1px solid rgba(255,255,255,0.05);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5) inset;
+  position: relative;
+  overflow: hidden;
+  text-transform: uppercase;
+}
+.sf-char::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(0,0,0,0.7);
+  z-index: 2;
+}
+.sf-flip {
+  animation: flipDown 0.15s ease-in-out;
+}
+@keyframes flipDown {
+  0% { transform: scaleY(1); opacity: 1; }
+  50% { transform: scaleY(0); opacity: 0.5; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+
+/* Neon glows for severity */
+.glow-critical { filter: drop-shadow(0 0 10px var(--sev-critical)); fill: var(--sev-critical) !important; color: var(--sev-critical) !important; }
+.glow-alert    { filter: drop-shadow(0 0 10px var(--sev-alert)); fill: var(--sev-alert) !important; color: var(--sev-alert) !important; }
+.glow-watch    { filter: drop-shadow(0 0 10px var(--sev-watch)); fill: var(--sev-watch) !important; color: var(--sev-watch) !important; }
+.glow-nominal  { filter: drop-shadow(0 0 10px var(--sev-nominal)); fill: var(--sev-nominal) !important; color: var(--sev-nominal) !important; }
