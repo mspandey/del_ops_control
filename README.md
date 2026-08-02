@@ -8,6 +8,8 @@
   <p>
     An intelligent, single-page command center that turns 8 fragmented airport data sources into unified, real-time operational intelligence.
   </p>
+  <br/>
+  <img src="ops-control-hero.jpg" alt="DEL Ops Control Center" width="100%" />
 </div>
 
 ---

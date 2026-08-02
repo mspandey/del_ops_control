@@ -8,7 +8,21 @@
   'use strict';
 
   const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const P = (s) => (s ? new Date(s.replace(' ', 'T')) : null);
+  const P = (s) => {
+    if (!s) return null;
+    const [d, t] = s.split(' ');
+    if (!t) return new Date(s);
+    const [yr, mo, da] = d.split('-');
+    const [hr, mi, se] = t.split(':');
+    return new Date(yr, mo - 1, da, hr, mi, se);
+  };
+
+  function isRecordActive(t, start, end) {
+    if (!start || !end) return false;
+    const realStart = start > end ? end : start;
+    const realEnd = start > end ? start : end;
+    return t >= realStart && t <= realEnd;
+  }
 
   // ─── Parse all tables ─────────────────────────────────────────────────────
   const flights     = RAW.flights.map(f     => ({ ...f, _schedDep: P(f.sched_dep),        _actDep: P(f.actual_dep),    _schedArr: P(f.sched_arr),      _actArr: P(f.actual_arr) }));
@@ -19,6 +33,14 @@
   const retail      = RAW.retail.map(r      => ({ ...r, _txn:      P(r.txn_time) }));
   const maintenance = RAW.maintenance.map(m => ({ ...m, _start:    P(m.start_time),         _end:      P(m.end_time) }));
   const gateEvents  = RAW.gateEvents.map(g  => ({ ...g, _t:        P(g.event_time) }));
+
+  console.log('--- DEBUG: TIMESTAMPS ---');
+  console.log('Current simTime value:', new Date(2024, 9, 22, 6, 0, 0));
+  console.log('simTime format/type:', typeof new Date(), (new Date(2024, 9, 22) instanceof Date ? 'Date object' : ''));
+  console.log('Raw Staff [0]:', RAW.staff[0].shift_start, '->', RAW.staff[0].shift_end);
+  console.log('Raw Staff [1]:', RAW.staff[1].shift_start, '->', RAW.staff[1].shift_end);
+  console.log('Raw Gate [0]:', RAW.gateEvents[0].event_time);
+  console.log('---------------------------');
 
   // ─── Indexes ──────────────────────────────────────────────────────────────
   const byId = (arr, key) => { const m = new Map(); for (const r of arr) { const k = r[key]; if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return m; };
@@ -386,7 +408,7 @@
       const list = byG.get(g); let conflict = false;
       for (let i=0;i<list.length;i++) for (let j=i+1;j<list.length;j++) { const [as,ae]=gateWindow(list[i]),[bs,be]=gateWindow(list[j]); if(as<be&&bs<ae) conflict=true; }
       let st = 'idle';
-      const occ = list.find(f => { const [s,e]=gateWindow(f); return t>=s&&t<=e; });
+      const occ = list.find(f => { const [s,e]=gateWindow(f); return isRecordActive(t, s, e); });
       if (conflict) st = 'conflict';
       else if (occ) { const c = flightStatusAt(occ, t).code; st = c==='boarding'?'boarding':'occupied'; }
       return { gate: g, state: st, flight: occ };
@@ -652,48 +674,70 @@
   // DIGITAL TWIN MAP
   // ──────────────────────────────────────────────────────────────────────────
   function renderMap(el) {
-    if (el.dataset.initialized !== 'true') {
+    if (el.dataset.initializedTab !== 'map') {
+      el.dataset.initializedTab = 'map';
       const numGates = GATES.length;
       const initialGatesHTML = GATES.map((g, i) => {
-        const angle = Math.PI * 0.85 - (i / (numGates - 1)) * (Math.PI * 0.70); // from left to right
-        const radius = 250;
-        const cx = 400 + Math.cos(angle) * radius;
-        const cy = 400 - Math.sin(angle) * radius;
-        // Text angle for rotation (outward)
-        const rot = -(angle * 180 / Math.PI) + 90;
+        const pierIdx = Math.floor(i / 13);
+        const posInPier = i % 13;
+        const isLeft = posInPier % 2 === 0;
+        const piersX = [200, 333, 466, 600];
+        const cx = piersX[pierIdx] + (isLeft ? -25 : 25);
+        const cy = 150 + Math.floor(posInPier / 2) * 45;
+        
         return `
-          <g transform="translate(${cx}, ${cy})">
-            <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(255,255,255,0.1)" stroke-width="2" transform="rotate(${rot})"/>
-            <circle cx="0" cy="0" r="14" class="map-gate" id="gate-circle-${g}" onclick="window.showToast('Gate ${g} is currently unoccupied.')" style="cursor:pointer; transition: all 0.3s;" />
-            <text x="0" y="4" class="map-gate-text" id="gate-text-${g}" style="font-size: 10px; text-anchor: middle;">${g}</text>
+          <g transform="translate(${cx}, ${cy})" id="gate-group-${g}" class="map-gate-group">
+            <line x1="0" y1="0" x2="${isLeft ? 18 : -18}" y2="0" stroke="rgba(255,255,255,0.1)" stroke-width="4" />
+            <circle cx="0" cy="0" r="16" class="map-gate" id="gate-circle-${g}" onclick="window.showToast('Gate ${g} is currently unoccupied.')" style="cursor:pointer; transition: all 0.3s;" role="button" tabindex="0" aria-label="Gate ${g}" />
+            <text x="0" y="4" class="map-gate-text" id="gate-text-${g}" style="font-size: 11px; text-anchor: middle; pointer-events: none; opacity: 0; transition: opacity 0.3s;">${g}</text>
+            <text x="${isLeft ? -22 : 22}" y="4" class="map-flight-label" id="flight-label-${g}" style="font-size: 12px; font-family: var(--font-mono); text-anchor: ${isLeft ? 'end' : 'start'}; fill: var(--ink-main); opacity: 0; transition: opacity 0.3s; pointer-events: none; font-weight: bold;"></text>
           </g>
         `;
       }).join('');
 
       el.innerHTML = `
-        <div class="section-title">Digital Twin <span style="font-size:12px;color:var(--sev-watch);border:1px solid var(--sev-watch);padding:2px 6px;border-radius:4px;margin-left:12px;">LIVE</span></div>
-        <div class="section-sub">Real-time abstract representation of Terminal 3 gates and runway.</div>
-        <div class="map-container" style="background: var(--bg-1); border-radius: 8px; border: 1px solid var(--panel-border); margin-top: 16px;">
-          <svg class="map-svg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid meet" id="mapSvg" style="width: 100%; height: 60vh;">
-            <!-- Terminal Arc -->
-            <path d="M 160 400 A 240 240 0 0 1 640 400" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="60" stroke-linecap="round"/>
-            <path d="M 160 400 A 240 240 0 0 1 640 400" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round"/>
-            
-            <!-- Runway -->
-            <line x1="100" y1="650" x2="700" y2="650" stroke="rgba(255,255,255,0.2)" stroke-width="30" stroke-linecap="round" />
-            <line x1="150" y1="650" x2="650" y2="650" stroke="rgba(255,255,255,0.8)" stroke-width="4" stroke-dasharray="20, 20" />
-            <text x="70" y="655" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="14" text-anchor="middle" transform="rotate(-90 70 655)">29R</text>
-            <text x="730" y="655" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="14" text-anchor="middle" transform="rotate(90 730 655)">11L</text>
-            
-            <!-- Tarmac markings -->
-            <path d="M 400 400 L 400 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
-            <path d="M 280 400 L 280 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
-            <path d="M 520 400 L 520 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
+        <style>
+          .map-gate-group:hover .map-gate-text { opacity: 1 !important; fill: #fff !important; }
+        </style>
+        <div class="section-title">Digital Twin · T3 Concourses</div>
+        <div class="section-sub">Live physical schematic of terminal gates (1-50). Aircraft and gate states update instantly as the timeline progresses.</div>
+        <div class="map-wrap" style="margin-top: 16px;">
+          <div class="map-container" style="background: var(--bg-1); border-radius: 8px; border: 1px solid var(--panel-hair);">
+            <svg class="map-svg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid meet" id="mapSvg" style="width: 100%; height: 60vh;">
+              
+              <!-- Main Terminal Spine -->
+              <line x1="150" y1="120" x2="650" y2="120" stroke="rgba(255,255,255,0.05)" stroke-width="40" stroke-linecap="round"/>
+              <line x1="150" y1="120" x2="650" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round"/>
+              <!-- Pier 1 -->
+              <line x1="200" y1="120" x2="200" y2="450" stroke="rgba(255,255,255,0.05)" stroke-width="40" stroke-linecap="round"/>
+              <line x1="200" y1="120" x2="200" y2="450" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round"/>
+              <!-- Pier 2 -->
+              <line x1="333" y1="120" x2="333" y2="450" stroke="rgba(255,255,255,0.05)" stroke-width="40" stroke-linecap="round"/>
+              <line x1="333" y1="120" x2="333" y2="450" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round"/>
+              <!-- Pier 3 -->
+              <line x1="466" y1="120" x2="466" y2="450" stroke="rgba(255,255,255,0.05)" stroke-width="40" stroke-linecap="round"/>
+              <line x1="466" y1="120" x2="466" y2="450" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round"/>
+              <!-- Pier 4 -->
+              <line x1="600" y1="120" x2="600" y2="450" stroke="rgba(255,255,255,0.05)" stroke-width="40" stroke-linecap="round"/>
+              <line x1="600" y1="120" x2="600" y2="450" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round"/>
+              
+              <!-- Runway -->
+              <line x1="100" y1="650" x2="700" y2="650" stroke="rgba(255,255,255,0.2)" stroke-width="30" stroke-linecap="round" />
+              <line x1="150" y1="650" x2="650" y2="650" stroke="rgba(255,255,255,0.8)" stroke-width="4" stroke-dasharray="20, 20" />
+              <text x="70" y="655" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="14" text-anchor="middle" transform="rotate(-90 70 655)">29R</text>
+              <text x="730" y="655" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="14" text-anchor="middle" transform="rotate(90 730 655)">11L</text>
+              
+              <!-- Tarmac taxiways (connecting piers to runway) -->
+              <path d="M 200 450 L 200 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
+              <path d="M 333 450 L 333 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
+              <path d="M 466 450 L 466 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
+              <path d="M 600 450 L 600 635" stroke="rgba(200, 162, 90, 0.3)" stroke-width="2" stroke-dasharray="5, 5" fill="none"/>
 
-            <g id="mapLinesLayer"></g>
-            <g id="mapGatesLayer">${initialGatesHTML}</g>
-            <g id="mapPlanesLayer"></g>
-          </svg>
+              <g id="mapLinesLayer"></g>
+              <g id="mapGatesLayer">${initialGatesHTML}</g>
+              <g id="mapPlanesLayer"></g>
+            </svg>
+          </div>
         </div>
       `;
       el.dataset.initialized = 'true';
@@ -718,16 +762,24 @@
       });
       const c = document.getElementById('gate-circle-' + g);
       const tEl = document.getElementById('gate-text-' + g);
-      if (c && tEl) {
+      const fLabel = document.getElementById('flight-label-' + g);
+      if (c && tEl && fLabel) {
         if (occ) {
           const sev = severityOf(occ);
-          c.setAttribute('class', 'map-gate glow-' + sev);
-          c.setAttribute('onclick', `openFlightDrawer('${occ.flight_id}')`);
+          const st = flightStatusAt(occ, t).code;
+          const trueSev = st === 'boarding' ? 'boarding' : sev;
+          c.setAttribute('class', `map-gate glow-${trueSev}`);
+          c.setAttribute('onclick', `window.openFlightDrawer('${occ.flight_id}')`);
+          fLabel.textContent = occ.flight_id;
+          fLabel.style.opacity = '1';
+          tEl.style.opacity = '1';
           tEl.style.fill = '#111';
           tEl.style.fontWeight = 'bold';
         } else {
           c.setAttribute('class', 'map-gate');
-          c.setAttribute('onclick', `showToast('Gate ${g} is currently unoccupied.')`);
+          c.setAttribute('onclick', `window.showToast('Gate ${g} is currently unoccupied.')`);
+          fLabel.style.opacity = '0';
+          tEl.style.opacity = '0';
           tEl.style.fill = '';
           tEl.style.fontWeight = '';
         }
@@ -905,12 +957,15 @@
       const sev = severityOf(f);
       const colorClass = sev !== 'nominal' ? ' glow-' + sev : '';
       
-      const rowStr = (time + ' ' + flId + ' ' + dest + ' ' + gate + ' ' + stat).toUpperCase();
-      const chars = rowStr.split('').map(c => 
-        `<div class="sf-char${colorClass}">${c}</div>`
-      ).join('');
-      
-      return `<div class="sf-row" onclick="window.showFlight('${esc(f.flight_id)}')">${chars}</div>`;
+      const buildChars = (s) => s.toUpperCase().split('').map(c => `<div class="sf-char">${c}</div>`).join('');
+
+      return `<div class="sf-row${colorClass}" onclick="window.showFlight('${esc(f.flight_id)}')">
+        <div class="sf-col-time" style="display:flex;gap:2px;">${buildChars(time)}</div>
+        <div class="sf-col-flt" style="display:flex;gap:2px;">${buildChars(flId)}</div>
+        <div class="sf-col-dest" style="display:flex;gap:2px;">${buildChars(dest)}</div>
+        <div class="sf-col-gate" style="display:flex;gap:2px;">${buildChars(gate)}</div>
+        <div class="sf-col-stat" style="display:flex;gap:2px;">${buildChars(stat)}</div>
+      </div>`;
     }).join('');
     
     if (board.innerHTML !== newBoardHTML) {
@@ -1119,65 +1174,179 @@
   // STAFF + RETAIL + MAINTENANCE
   // ──────────────────────────────────────────────────────────────────────────
   function renderStaff(el) {
+    if (el.dataset.initializedTab !== 'staff') {
+      el.dataset.initializedTab = 'staff';
+      const allDeptsObj = {}; for (const s of staff) allDeptsObj[s.department] = (allDeptsObj[s.department]||0)+1;
+      const allDepts = Object.keys(allDeptsObj).sort((a,b)=>allDeptsObj[b]-allDeptsObj[a]);
+      
+      el.innerHTML = `
+        <div class="section-title">Workforce</div>
+        <div class="section-sub"><span id="staffTotalCount">0</span> shift records · <b id="staffOnShiftCountSub">0</b> currently on duty at the simulated time.</div>
+        <div class="chart-row" style="margin-bottom:14px;">
+          <div class="panel"><div class="panel-header"><h2>Departments on Duty</h2></div>
+            <div class="panel-body"><div class="mini-bar-row">
+              ${allDepts.map(k=>`<div class="mini-bar-col"><div class="mini-bar" id="staff-bar-${esc(k.replace(/\s/g,''))}" style="height:4px; transition: height 0.3s, background-color 0.3s;" title="${k}: 0"></div><div class="mini-bar-label">${esc(k.substring(0,5))}</div></div>`).join('')}
+            </div></div>
+          </div>
+          <div class="panel"><div class="panel-header"><h2>On Shift Now</h2></div><div class="panel-body"><div class="stat-row">
+            <div class="stat-block"><div class="n mono" id="staffOnShiftCount">0</div><div class="l">On duty</div></div>
+            <div class="stat-block"><div class="n mono" id="staffOTCount">0</div><div class="l">Overtime</div></div>
+            <div class="stat-block"><div class="n mono" id="staffActiveDepts">0</div><div class="l">Depts active</div></div>
+          </div></div></div>
+        </div>
+        <div class="panel"><div class="panel-header"><h2>On-Shift Roster</h2></div><div class="panel-body table-wrap" style="max-height:52vh;overflow-y:auto;">
+          <table class="data"><thead><tr><th>Name</th><th>Role</th><th>Gate</th><th>Shift</th><th>OT</th></tr></thead>
+          <tbody id="staffTableBody"></tbody>
+          </table></div></div>
+      `;
+      el.dataset.initialized = 'true';
+      el.dataset.allDepts = JSON.stringify(allDepts);
+    }
+
     const t = state.simTime;
-    const onShift = staff.filter(s => s._start && s._end && t >= s._start && t <= s._end);
-    const byDept = {}; for (const s of staff) byDept[s.department] = (byDept[s.department]||0)+1;
-    const maxD = Math.max(1,...Object.values(byDept));
-    el.innerHTML = `
-      <div class="section-title">Workforce</div>
-      <div class="section-sub">${staff.length.toLocaleString()} shift records · <b>${onShift.length}</b> currently on duty at the simulated time.</div>
-      <div class="chart-row" style="margin-bottom:14px;">
-        <div class="panel"><div class="panel-header"><h2>Departments</h2></div><div class="panel-body"><div class="mini-bar-row">${Object.entries(byDept).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="mini-bar-col"><div class="mini-bar ${v===maxD?'hi':''}" style="height:${Math.max(4,v/maxD*58)}px" title="${k}: ${v}"></div><div class="mini-bar-label">${esc(k.substring(0,5))}</div></div>`).join('')}</div></div></div>
-        <div class="panel"><div class="panel-header"><h2>On Shift Now</h2></div><div class="panel-body"><div class="stat-row"><div class="stat-block"><div class="n mono">${onShift.length}</div><div class="l">On duty</div></div><div class="stat-block"><div class="n mono">${onShift.filter(s=>s.is_overtime).length}</div><div class="l">Overtime</div></div><div class="stat-block"><div class="n mono">${new Set(onShift.map(s=>s.department)).size}</div><div class="l">Depts active</div></div></div></div></div>
-      </div>
-      <div class="panel"><div class="panel-header"><h2>On-Shift Roster</h2></div><div class="panel-body table-wrap" style="max-height:52vh;overflow-y:auto;">
-        <table class="data"><thead><tr><th>Name</th><th>Role</th><th>Gate</th><th>Shift</th><th>OT</th></tr></thead>
-        <tbody>${onShift.slice(0,100).map(s=>`<tr><td>${esc(s.staff_name)}<br><span style="color:var(--ink-faint);font-size:10px;">${esc(s.staff_id)}</span></td><td>${esc(s.role)}</td><td>${esc(s.terminal)}/${esc(s.gate)}</td><td>${fmtTime(s._start)}–${fmtTime(s._end)}</td><td>${s.is_overtime?pillFor('watch','OT'):'—'}</td></tr>`).join('')||`<tr><td colspan="5" class="alert-empty">No staff on shift in this window.</td></tr>`}</tbody>
-        </table></div></div>`;
+    const onShift = staff.filter(s => isRecordActive(t, s._start, s._end));
+    const byDept = {}; for (const s of onShift) byDept[s.department] = (byDept[s.department]||0)+1;
+    const maxD = Math.max(1, ...Object.values(byDept));
+
+    document.getElementById('staffTotalCount').innerText = staff.length.toLocaleString();
+    document.getElementById('staffOnShiftCountSub').innerText = onShift.length;
+    document.getElementById('staffOnShiftCount').innerText = onShift.length;
+    document.getElementById('staffOTCount').innerText = onShift.filter(s=>s.is_overtime).length;
+    document.getElementById('staffActiveDepts').innerText = Object.keys(byDept).length;
+
+    const allDepts = JSON.parse(el.dataset.allDepts);
+    allDepts.forEach(k => {
+      const v = byDept[k] || 0;
+      const bar = document.getElementById('staff-bar-' + k.replace(/\s/g, ''));
+      if (bar) {
+        bar.style.height = Math.max(4, (v/maxD)*58) + 'px';
+        if (v === maxD && maxD > 1) bar.classList.add('hi'); else bar.classList.remove('hi');
+        bar.title = `${k}: ${v}`;
+      }
+    });
+
+    const tbody = document.getElementById('staffTableBody');
+    if (tbody) {
+      tbody.innerHTML = onShift.slice(0,100).map(s=>`<tr><td>${esc(s.staff_name)}<br><span style="color:var(--ink-faint);font-size:10px;">${esc(s.staff_id)}</span></td><td>${esc(s.role)}</td><td>${esc(s.terminal)}/${esc(s.gate)}</td><td>${fmtTime(s._start)}–${fmtTime(s._end)}</td><td>${s.is_overtime?pillFor('watch','OT'):'—'}</td></tr>`).join('')||`<tr><td colspan="5" class="alert-empty">No staff on shift in this window.</td></tr>`;
+    }
   }
 
   function renderRetail(el) {
-    const w_ = retail.filter(r => r._txn && Math.abs(r._txn - state.simTime) < 12*3600000);
-    const totalRev = retail.reduce((a,r)=>a+r.amount,0);
-    const byCategory = {}; for (const r of retail) byCategory[r.category] = (byCategory[r.category]||0)+r.amount;
-    const maxCat = Math.max(1,...Object.values(byCategory));
-    el.innerHTML = `
-      <div class="section-title">Retail &amp; Concessions</div>
-      <div class="section-sub">${retail.length.toLocaleString()} transactions — joined to flights via passenger passport. Click any row to open the linked flight detail.</div>
-      <div class="chart-row" style="margin-bottom:14px;">
-        <div class="panel"><div class="panel-header"><h2>Revenue by Category</h2></div><div class="panel-body"><div class="mini-bar-row">${Object.entries(byCategory).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="mini-bar-col"><div class="mini-bar ${v===maxCat?'hi':''}" style="height:${Math.max(4,v/maxCat*58)}px" title="${k}: ₹${Math.round(v).toLocaleString('en-IN')}"></div><div class="mini-bar-label">${esc(k.substring(0,5))}</div></div>`).join('')}</div></div></div>
-        <div class="panel"><div class="panel-header"><h2>Revenue</h2></div><div class="panel-body"><div class="stat-row"><div class="stat-block"><div class="n mono" style="font-size:20px;">₹${Math.round(totalRev).toLocaleString('en-IN')}</div><div class="l">Total dataset</div></div><div class="stat-block"><div class="n mono" style="font-size:20px;">₹${Math.round(w_.reduce((a,r)=>a+r.amount,0)).toLocaleString('en-IN')}</div><div class="l">±12h window</div></div></div></div></div>
-      </div>
-      <div class="panel"><div class="panel-header"><h2>Transactions ±12h</h2></div><div class="panel-body table-wrap" style="max-height:48vh;overflow-y:auto;">
-        <table class="data"><thead><tr><th>Txn</th><th>Flight</th><th>Item</th><th>Qty</th><th>Amount</th><th>Time</th></tr></thead>
-        <tbody>${w_.slice(0,80).map(r=>`<tr data-flight="${esc(r.flight_id)}" tabindex="0"><td>${esc(r.txn_id.split('-')[0])}</td><td><b>${esc(r.flight_id)}</b></td><td>${esc(r.item)}</td><td>${r.quantity}</td><td>₹${r.amount}</td><td>${fmtTime(r._txn)}</td></tr>`).join('')||`<tr><td colspan="6" class="alert-empty">No transactions in window.</td></tr>`}</tbody>
-        </table></div></div>`;
-    el.querySelectorAll('[data-flight]').forEach(r => { r.addEventListener('click', () => openFlightDrawer(r.dataset.flight)); r.addEventListener('keydown', e => { if (e.key==='Enter') openFlightDrawer(r.dataset.flight); }); });
+    if (el.dataset.initializedTab !== 'retail') {
+      el.dataset.initializedTab = 'retail';
+      const allCatObj = {}; for (const r of retail) allCatObj[r.category] = (allCatObj[r.category]||0)+r.amount;
+      const allCat = Object.keys(allCatObj).sort((a,b)=>allCatObj[b]-allCatObj[a]);
+
+      el.innerHTML = `
+        <div class="section-title">Retail &amp; Concessions</div>
+        <div class="section-sub">${retail.length.toLocaleString()} transactions — joined to flights via passenger passport. Click any row to open the linked flight detail.</div>
+        <div class="chart-row" style="margin-bottom:14px;">
+          <div class="panel"><div class="panel-header"><h2>Revenue by Category (±12h)</h2></div>
+            <div class="panel-body"><div class="mini-bar-row">
+              ${allCat.map(k=>`<div class="mini-bar-col"><div class="mini-bar" id="retail-bar-${esc(k.replace(/\\s/g,''))}" style="height:4px; transition: height 0.3s, background-color 0.3s;" title="${k}: 0"></div><div class="mini-bar-label">${esc(k.substring(0,5))}</div></div>`).join('')}
+            </div></div>
+          </div>
+          <div class="panel"><div class="panel-header"><h2>Revenue</h2></div><div class="panel-body"><div class="stat-row">
+            <div class="stat-block"><div class="n mono" style="font-size:20px;">₹${Math.round(retail.reduce((a,r)=>a+r.amount,0)).toLocaleString('en-IN')}</div><div class="l">Total dataset</div></div>
+            <div class="stat-block"><div class="n mono" style="font-size:20px;" id="retailWindowTotal">₹0</div><div class="l">±12h window</div></div>
+          </div></div></div>
+        </div>
+        <div class="panel"><div class="panel-header"><h2>Transactions ±12h</h2></div><div class="panel-body table-wrap" style="max-height:48vh;overflow-y:auto;">
+          <table class="data"><thead><tr><th>Txn</th><th>Flight</th><th>Item</th><th>Qty</th><th>Amount</th><th>Time</th></tr></thead>
+          <tbody id="retailTableBody"></tbody>
+          </table></div></div>
+      `;
+      el.dataset.initialized = 'true';
+      el.dataset.allCat = JSON.stringify(allCat);
+    }
+
+    const t = state.simTime;
+    const w_ = retail.filter(r => r._txn && Math.abs(r._txn - t) < 12*3600000);
+    const byCategory = {}; for (const r of w_) byCategory[r.category] = (byCategory[r.category]||0)+r.amount;
+    const maxCat = Math.max(1, ...Object.values(byCategory));
+
+    document.getElementById('retailWindowTotal').innerText = '₹' + Math.round(w_.reduce((a,r)=>a+r.amount,0)).toLocaleString('en-IN');
+
+    const allCat = JSON.parse(el.dataset.allCat);
+    allCat.forEach(k => {
+      const v = byCategory[k] || 0;
+      const bar = document.getElementById('retail-bar-' + k.replace(/\\s/g, ''));
+      if (bar) {
+        bar.style.height = Math.max(4, (v/maxCat)*58) + 'px';
+        if (v === maxCat && maxCat > 1) bar.classList.add('hi'); else bar.classList.remove('hi');
+        bar.title = `${k}: ₹${Math.round(v).toLocaleString('en-IN')}`;
+      }
+    });
+
+    const tbody = document.getElementById('retailTableBody');
+    if (tbody) {
+      tbody.innerHTML = w_.slice(0,80).map(r=>`<tr data-flight="${esc(r.flight_id)}" tabindex="0"><td>${esc(r.txn_id.split('-')[0])}</td><td><b>${esc(r.flight_id)}</b></td><td>${esc(r.item)}</td><td>${r.quantity}</td><td>₹${r.amount}</td><td>${fmtTime(r._txn)}</td></tr>`).join('')||`<tr><td colspan="6" class="alert-empty">No transactions in window.</td></tr>`;
+      // Re-attach listeners to new rows (within the table body!)
+      tbody.querySelectorAll('[data-flight]').forEach(r => { r.addEventListener('click', () => openFlightDrawer(r.dataset.flight)); r.addEventListener('keydown', e => { if (e.key==='Enter') openFlightDrawer(r.dataset.flight); }); });
+    }
   }
 
   function renderMaintenance(el) {
-    const t    = state.simTime;
-    const open = maintenance.filter(m => m._end && m._end > t && m._start && m._start <= t);
-    const byType = {}; for (const m of maintenance) byType[m.maint_type] = (byType[m.maint_type]||0)+1;
-    const maxT = Math.max(1,...Object.values(byType));
-    el.innerHTML = `
-      <div class="section-title">Maintenance &amp; Engineering</div>
-      <div class="section-sub">${maintenance.length.toLocaleString()} work orders. <b>${open.length}</b> open now. WOs are cross-checked against upcoming departures — conflicts surface in the incident feed and on flight risk badges.</div>
-      <div class="chart-row" style="margin-bottom:14px;">
-        <div class="panel"><div class="panel-header"><h2>WO Types</h2></div><div class="panel-body"><div class="mini-bar-row">${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="mini-bar-col"><div class="mini-bar ${v===maxT?'hi':''}" style="height:${Math.max(4,v/maxT*58)}px" title="${k}: ${v}"></div><div class="mini-bar-label">${esc(k.substring(0,6))}</div></div>`).join('')}</div></div></div>
-        <div class="panel"><div class="panel-header"><h2>Fleet Health</h2><span class="hint mono">${fmtTime(t)}</span></div><div class="panel-body"><div class="stat-row"><div class="stat-block"><div class="n mono">${open.length}</div><div class="l">Open WOs</div></div><div class="stat-block"><div class="n mono">${new Set(open.map(m=>m.tail_number)).size}</div><div class="l">Aircraft affected</div></div><div class="stat-block"><div class="n mono">${(maintenance.reduce((a,m)=>a+(m.downtime_hours||0),0)/maintenance.length).toFixed(1)}h</div><div class="l">Avg downtime</div></div></div></div></div>
-      </div>
-      <div class="panel"><div class="panel-header"><h2>Work Orders</h2></div><div class="panel-body table-wrap" style="max-height:58vh;overflow-y:auto;">
-        <table class="data"><thead><tr><th>WO</th><th>Tail</th><th>Type</th><th>Defect</th><th>Downtime</th><th>Status</th></tr></thead>
-        <tbody>${[...maintenance].sort((a,b)=>b._start-a._start).slice(0,120).map(m=>{
-          const isOpen = m._end && m._end > t && m._start <= t;
-          const linkedF = flights.find(f => f.tail_number===m.tail_number);
-          return `<tr ${linkedF?`data-flight="${esc(linkedF.flight_id)}" tabindex="0"`:''}>
-            <td>${esc(m.work_order_id)}</td><td class="mono">${esc(m.tail_number)}</td>
-            <td>${esc(m.maint_type)}</td><td>${esc(m.defect_type)}</td>
-            <td>${m.downtime_hours}h</td><td>${isOpen?pillFor('watch','Open'):pillFor('nominal','Closed')}</td></tr>`;
-        }).join('')}</tbody></table></div></div>`;
-    el.querySelectorAll('[data-flight]').forEach(r => { r.addEventListener('click', () => openFlightDrawer(r.dataset.flight)); r.addEventListener('keydown', e => { if (e.key==='Enter') openFlightDrawer(r.dataset.flight); }); });
+    if (el.dataset.initializedTab !== 'maintenance') {
+      el.dataset.initializedTab = 'maintenance';
+      const allTypesObj = {}; for (const m of maintenance) allTypesObj[m.maint_type] = (allTypesObj[m.maint_type]||0)+1;
+      const allTypes = Object.keys(allTypesObj).sort((a,b)=>allTypesObj[b]-allTypesObj[a]);
+
+      el.innerHTML = `
+        <div class="section-title">Maintenance &amp; Engineering</div>
+        <div class="section-sub">${maintenance.length.toLocaleString()} work orders. <b id="maintOpenCountSub">0</b> open now. WOs are cross-checked against upcoming departures — conflicts surface in the incident feed and on flight risk badges.</div>
+        <div class="chart-row" style="margin-bottom:14px;">
+          <div class="panel"><div class="panel-header"><h2>Open WO Types</h2></div>
+            <div class="panel-body"><div class="mini-bar-row">
+              ${allTypes.map(k=>`<div class="mini-bar-col"><div class="mini-bar" id="maint-bar-${esc(k.replace(/\\s/g,''))}" style="height:4px; transition: height 0.3s, background-color 0.3s;" title="${k}: 0"></div><div class="mini-bar-label">${esc(k.substring(0,6))}</div></div>`).join('')}
+            </div></div>
+          </div>
+          <div class="panel"><div class="panel-header"><h2>Fleet Health</h2><span class="hint mono" id="maintSimTime">00:00</span></div><div class="panel-body"><div class="stat-row">
+            <div class="stat-block"><div class="n mono" id="maintOpenCount">0</div><div class="l">Open WOs</div></div>
+            <div class="stat-block"><div class="n mono" id="maintAffectedCount">0</div><div class="l">Aircraft affected</div></div>
+            <div class="stat-block"><div class="n mono">${(maintenance.reduce((a,m)=>a+(m.downtime_hours||0),0)/maintenance.length).toFixed(1)}h</div><div class="l">Avg downtime</div></div>
+          </div></div></div>
+        </div>
+        <div class="panel"><div class="panel-header"><h2>Work Orders</h2></div><div class="panel-body table-wrap" style="max-height:58vh;overflow-y:auto;">
+          <table class="data"><thead><tr><th>WO</th><th>Tail</th><th>Type</th><th>Defect</th><th>Downtime</th><th>Status</th></tr></thead>
+          <tbody id="maintTableBody"></tbody>
+          </table></div></div>
+      `;
+      el.dataset.initialized = 'true';
+      el.dataset.allTypes = JSON.stringify(allTypes);
+    }
+
+    const t = state.simTime;
+    const activeMaint = maintenance.filter(m => isRecordActive(t, m._start, m._end));
+    const byType = {}; for (const m of activeMaint) byType[m.maint_type] = (byType[m.maint_type]||0)+1;
+    const maxT = Math.max(1, ...Object.values(byType));
+
+    document.getElementById('maintAffectedCount').innerText = new Set(open.map(m=>m.tail_number)).size;
+    document.getElementById('maintSimTime').innerText = fmtTime(t);
+
+    const allTypes = JSON.parse(el.dataset.allTypes);
+    allTypes.forEach(k => {
+      const v = byType[k] || 0;
+      const bar = document.getElementById('maint-bar-' + k.replace(/\\s/g, ''));
+      if (bar) {
+        bar.style.height = Math.max(4, (v/maxT)*58) + 'px';
+        if (v === maxT && maxT > 1) bar.classList.add('hi'); else bar.classList.remove('hi');
+        bar.title = `${k}: ${v}`;
+      }
+    });
+
+    const tbody = document.getElementById('maintTableBody');
+    if (tbody) {
+      tbody.innerHTML = [...maintenance].sort((a,b)=>b._start-a._start).slice(0,120).map(m=>{
+        const isOpen = m._end && m._end > t && m._start <= t;
+        const linkedF = flights.find(f => f.tail_number===m.tail_number);
+        return `<tr ${linkedF?`data-flight="${esc(linkedF.flight_id)}" tabindex="0"`:''}>
+          <td>${esc(m.work_order_id)}</td><td class="mono">${esc(m.tail_number)}</td>
+          <td>${esc(m.maint_type)}</td><td>${esc(m.defect_type)}</td>
+          <td>${m.downtime_hours}h</td><td>${isOpen?pillFor('watch','Open'):pillFor('nominal','Closed')}</td></tr>`;
+      }).join('');
+      tbody.querySelectorAll('[data-flight]').forEach(r => { r.addEventListener('click', () => openFlightDrawer(r.dataset.flight)); r.addEventListener('keydown', e => { if (e.key==='Enter') openFlightDrawer(r.dataset.flight); }); });
+    }
   }
 
 
@@ -1457,13 +1626,17 @@
     requestAnimationFrame(loop);
   }
 
-  // ── Init ──────────────────────────────────────────────────────────────────
   const splashBtn = document.getElementById('btnEnterSplash');
   if (splashBtn) {
     splashBtn.addEventListener('click', () => {
       document.getElementById('splashScreen').classList.add('hidden');
     });
   }
+
+  // Global exports for inline HTML handlers
+  window.openFlightDrawer = openFlightDrawer;
+  window.showFlight = openFlightDrawer;
+  window.showToast = showToast;
 
   tick();
   requestAnimationFrame(loop);
