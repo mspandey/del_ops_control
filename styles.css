@@ -94,7 +94,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .splash-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
 .splash-content { text-align: center; animation: fadeUp 1s cubic-bezier(0.1, 0.9, 0.2, 1) forwards; }
-.splash-logo { margin-bottom: 24px; display: inline-flex; justify-content: center; }
+.splash-logo { margin-bottom: 24px; display: inline-flex; justify-content: center; width: 64px; height: 64px; }
 .splash-title { font-family: var(--font-disp); font-size: 32px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink); margin: 0 0 8px 0; }
 .splash-subtitle { font-size: 14px; color: var(--ink-subtle); margin: 0 0 32px 0; }
 .splash-btn {
@@ -281,7 +281,7 @@ input[type="range"].scrub::-webkit-slider-thumb:active { cursor: grabbing; trans
    WORKSPACE
 ══════════════════════════════════════════ */
 .workspace { display: grid; grid-template-columns: 1fr 320px; min-height: 0; }
-.main-col  { padding: 18px 22px; min-width: 0; }
+.main-col  { padding: 18px 22px; min-width: 0; min-height: 600px; display: flex; flex-direction: column; }
 .side-col  { border-left: 1px solid var(--panel-hair); padding: 16px 14px; background: var(--bg-1); display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 
 
@@ -735,6 +735,7 @@ footer.app-footer {
   gap: 2px;
   background: transparent;
   padding: 0;
+  min-height: 240px; /* Reserve space for rows */
 }
 .sf-row {
   display: flex;
