@@ -34,6 +34,7 @@
   // ─── Dataset bounds ───────────────────────────────────────────────────────
   const allTimes = flights.flatMap(f => [f._schedDep, f._actArr]).filter(Boolean).map(d => d.getTime());
   const MIN_T = Math.min(...allTimes), MAX_T = Math.max(...allTimes);
+  const BOARD_LEAD = 35, GATE_BUF = 20;
 
   // ─── Gates ────────────────────────────────────────────────────────────────
   const GATES = [...new Set(flights.map(f => f.gate))].filter(Boolean).sort((a, b) => {
@@ -81,8 +82,6 @@
   // ════════════════════════════════════════════════════════════════════════
   // DOMAIN HELPERS
   // ════════════════════════════════════════════════════════════════════════
-
-  const BOARD_LEAD = 35, GATE_BUF = 20;
 
   function flightStatusAt(f, t) {
     const dep = f._actDep || f._schedDep, arr = f._actArr || f._schedArr;
